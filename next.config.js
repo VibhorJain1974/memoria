@@ -1,20 +1,27 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    optimizeCss: true,
+  },
   images: {
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 60,
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'ousdettqwmsquggqneyp.supabase.co',
-        port: '',
-        pathname: '/storage/v1/object/**',
+        hostname: '*.r2.dev',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.cloudflare.com',
       },
     ],
   },
-  experimental: {
-    serverActions: {
-      allowedOrigins: ['localhost:3000'],
-    },
-  },
+  compress: true,
 }
 
 module.exports = nextConfig
