@@ -9,9 +9,7 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
+        getAll() { return request.cookies.getAll() },
         setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
@@ -23,31 +21,26 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh session if expired
   const { data: { user } } = await supabase.auth.getUser()
+  const { pathname } = request.nextUrl
 
-  // Protect dashboard, groups, flashbacks, settings routes
-  const protectedPaths = ['/dashboard', '/groups', '/flashbacks', '/settings', '/admin']
-  const isProtected = protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))
+  const isPublic = pathname === '/'
+    || pathname.startsWith('/auth')
+    || pathname.startsWith('/join')
+    || pathname.startsWith('/_next')
+    || pathname.startsWith('/api/')
+    || /\.\w+$/.test(pathname)   // static files
 
-  if (isProtected && !user) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/auth'
-    return NextResponse.redirect(url)
+  if (!user && !isPublic) {
+    return NextResponse.redirect(new URL('/auth', request.url))
   }
-
-  // Redirect logged-in users away from auth page
-  if (request.nextUrl.pathname === '/auth' && user) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
-    return NextResponse.redirect(url)
+  if (user && pathname === '/auth') {
+    return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
   return supabaseResponse
 }
 
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 }
