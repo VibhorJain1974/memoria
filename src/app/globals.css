@@ -336,3 +336,30 @@ body {
 
 :focus-visible { outline: 2px solid var(--purple); outline-offset: 3px; border-radius: 6px; }
 :focus:not(:focus-visible) { outline: none; }
+
+/* ── MOBILE SAFE AREA ────────────────────────────────── */
+.pb-safe { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+
+/* ── SHAKE ANIMATION (auth errors) ──────────────────── */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
+}
+.animate-shake { animation: shake 0.4s ease; }
+
+/* ── MEMORIA BRAND COLORS (Tailwind alias) ───────────── */
+.text-memoria-400 { color: #7c6ff7; }
+.bg-memoria-500\/20 { background: rgba(101,88,245,0.2); }
+.border-memoria-500 { border-color: #6558f5; }
+.border-memoria-500\/30 { border-color: rgba(101,88,245,0.3); }
+.ring-memoria-500 { --tw-ring-color: #6558f5; }
+
+/* ── OTP INPUT focus ring ────────────────────────────── */
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="tel"]:focus {
+  box-shadow: 0 0 0 2px rgba(101,88,245,0.25);
+}

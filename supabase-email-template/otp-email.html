@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Your Memoria code</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0f; font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif; color: #fff; -webkit-font-smoothing: antialiased; }
+    .wrapper { max-width: 520px; margin: 0 auto; padding: 40px 20px; }
+    .card {
+      background: linear-gradient(145deg, #111118 0%, #0f0f1a 100%);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 28px;
+      padding: 44px 40px;
+      text-align: center;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .glow-strip {
+      height: 3px;
+      width: 120px;
+      margin: 0 auto 32px;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #6558f5, #ec4899, #22d3ee);
+    }
+    .logo { font-size: 52px; margin-bottom: 10px; }
+    .brand {
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #6558f5 0%, #ec4899 50%, #22d3ee 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 6px;
+    }
+    .tagline { color: rgba(255,255,255,0.28); font-size: 13px; margin-bottom: 36px; }
+    .hi { font-size: 17px; color: rgba(255,255,255,0.65); margin-bottom: 8px; font-weight: 500; }
+    .desc { font-size: 13.5px; color: rgba(255,255,255,0.32); margin-bottom: 36px; line-height: 1.7; }
+    .otp-label { font-size: 11px; text-transform: uppercase; letter-spacing: 3px; color: rgba(255,255,255,0.25); margin-bottom: 16px; }
+    .otp-box {
+      display: inline-block;
+      padding: 20px 36px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(101,88,245,0.15), rgba(236,72,153,0.10));
+      border: 1.5px solid rgba(101,88,245,0.4);
+      box-shadow: 0 0 40px rgba(101,88,245,0.2), inset 0 1px 0 rgba(255,255,255,0.05);
+      margin-bottom: 28px;
+    }
+    .otp-code {
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: 12px;
+      background: linear-gradient(135deg, #a78bfa, #ec4899);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-indent: 12px;
+    }
+    .expiry-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 18px;
+      border-radius: 99px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.38);
+      font-size: 12px;
+      margin-bottom: 32px;
+    }
+    .divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent); margin: 24px 0; }
+    .security-note { font-size: 12px; color: rgba(255,255,255,0.2); line-height: 1.7; }
+    .security-note strong { color: rgba(255,255,255,0.35); }
+    .footer { margin-top: 28px; text-align: center; color: rgba(255,255,255,0.15); font-size: 11px; }
+    .heart { color: #ec4899; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="card">
+      <div class="glow-strip"></div>
+
+      <div class="logo">📸</div>
+      <div class="brand">Memoria</div>
+      <div class="tagline">Your memories, together. Forever.</div>
+
+      <div class="hi">Hey there! 👋</div>
+      <div class="desc">
+        Here's your one-time sign-in code for Memoria.<br/>
+        Just enter it in the app to get in — no passwords, ever.
+      </div>
+
+      <div class="otp-label">Your code</div>
+      <div class="otp-box">
+        <div class="otp-code">{{ .Token }}</div>
+      </div>
+
+      <div class="expiry-pill">
+        ⏱&nbsp; Expires in <strong style="color:rgba(255,255,255,0.5);margin-left:3px">10 minutes</strong>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="security-note">
+        <strong>Didn't request this?</strong> Just ignore this email — your account is safe and nothing will happen.<br/><br/>
+        Never share this code with anyone. Memoria will never ask for your code via chat or phone.
+      </div>
+    </div>
+
+    <div class="footer">
+      Made with <span class="heart">♥</span> for friend groups everywhere &nbsp;·&nbsp; Memoria
+    </div>
+  </div>
+</body>
+</html>
