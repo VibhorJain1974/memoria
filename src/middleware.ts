@@ -24,8 +24,9 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const { pathname } = request.nextUrl
 
-  const publicPaths = ['/', '/auth', '/join']
-  const isPublic = publicPaths.some(p => pathname === p || pathname.startsWith('/auth'))
+  const isPublic = ['/', '/auth', '/join'].some(p =>
+    pathname === p || pathname.startsWith('/auth')
+  )
 
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL('/auth', request.url))
@@ -38,5 +39,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 }
