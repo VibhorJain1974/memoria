@@ -7,9 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-// ── Admin phone — your number gets auto-admin on signup ──────────────────────
-const ADMIN_PHONE_DIGITS = '919729741974' // +91 9729741974
-// ─────────────────────────────────────────────────────────────────────────────
+const ADMIN_PHONE_DIGITS = '919729741974'
 
 const EMOJIS = ['📸', '🎞️', '🌟', '💜', '🎉', '🌈', '✨', '🦋', '🎨', '🌸']
 const AVATARS = [
@@ -35,6 +33,12 @@ export default function AuthPage() {
   const [resendTimer, setResendTimer] = useState(0)
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) router.push('/dashboard')
+    })
+  }, [])
 
   useEffect(() => {
     if (resendTimer > 0) {
@@ -65,7 +69,7 @@ export default function AuthPage() {
       if (error) throw error
       setMethod('phone'); setStep('otp'); setResendTimer(30)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'SMS not available — try email instead ✉️')
+      setError('SMS unavailable — please use email instead ✉️')
     } finally { setLoading(false) }
   }
 
@@ -84,10 +88,17 @@ export default function AuthPage() {
       if (result.error) throw result.error
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('No user')
-      const { data: profile } = await supabase.from('profiles').select('display_name').eq('id', user.id).single()
-      if (profile?.display_name) { router.push('/dashboard') } else { setStep('profile') }
+      // Check if profile already has a display_name set (returning user)
+      const { data: profile } = await supabase
+        .from('profiles').select('display_name').eq('id', user.id).single()
+      if (profile?.display_name && profile.display_name !== profile.display_name.match(/^[a-z0-9_]+$/)?.[0]) {
+        router.push('/dashboard')
+      } else {
+        setStep('profile')
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Invalid code — try again')
+      setOtp(['', '', '', '', '', ''])
     } finally { setLoading(false) }
   }
 
@@ -99,20 +110,37 @@ export default function AuthPage() {
       if (!user) throw new Error('Not logged in')
       const phoneDigits = (user.phone || '').replace(/\D/g, '')
       const isAdminUser = phoneDigits === ADMIN_PHONE_DIGITS || phoneDigits.endsWith('9729741974')
-      const username = (user.email?.split('@')[0] || `user_${user.id.slice(0, 6)}`).toLowerCase().replace(/[^a-z0-9_]/g, '_')
-      const { error } = await supabase.from('profiles').upsert({
-        id: user.id,
-        display_name: displayName.trim(),
-        avatar_emoji: selectedAvatar,
-        is_admin: isAdminUser,
-        username,
-        vibe_color: '#6558f5',
-        updated_at: new Date().toISOString(),
-      })
-      if (error) throw error
+      const username = (user.email?.split('@')[0] || `user_${user.id.slice(0, 6)}`)
+        .toLowerCase().replace(/[^a-z0-9_]/g, '_')
+
+      // Use UPDATE — the trigger already created the row on signup
+      // Fall back to upsert only if somehow the row doesn't exist yet
+      const { error: updateErr } = await supabase.from('profiles')
+        .update({
+          display_name: displayName.trim(),
+          avatar_emoji: selectedAvatar,
+          is_admin: isAdminUser,
+          vibe_color: '#6558f5',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id)
+
+      if (updateErr) {
+        // Row didn't exist — insert it
+        const { error: insertErr } = await supabase.from('profiles').insert({
+          id: user.id,
+          username,
+          display_name: displayName.trim(),
+          avatar_emoji: selectedAvatar,
+          is_admin: isAdminUser,
+          vibe_color: '#6558f5',
+        })
+        if (insertErr) throw insertErr
+      }
+
       router.push('/dashboard')
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save')
+      setError(e instanceof Error ? e.message : 'Failed to save — try again')
     } finally { setLoading(false) }
   }
 
@@ -162,7 +190,6 @@ export default function AuthPage() {
       <div className="relative z-10 w-full max-w-sm mx-4">
         <AnimatePresence mode="wait">
 
-          {/* LANDING */}
           {step === 'landing' && (
             <motion.div key="landing" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -30 }} className="text-center">
               <motion.div animate={{ rotate: [0, -5, 5, -5, 0] }} transition={{ repeat: Infinity, duration: 4 }} className="text-7xl mb-6 inline-block">📸</motion.div>
@@ -175,7 +202,6 @@ export default function AuthPage() {
             </motion.div>
           )}
 
-          {/* METHOD PICKER */}
           {step === 'method' && (
             <motion.div key="method" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="glass-card p-8">
               <div className="text-4xl mb-4 text-center">👋</div>
@@ -205,13 +231,13 @@ export default function AuthPage() {
             </motion.div>
           )}
 
-          {/* EMAIL */}
           {step === 'email' && (
             <motion.div key="email" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="glass-card p-8">
               <div className="text-4xl mb-4 text-center">✉️</div>
               <h2 className="font-syne text-2xl font-bold text-center mb-2">What&apos;s your email?</h2>
               <p className="text-slate-400 text-center text-sm mb-6">No passwords — we&apos;ll email you a code</p>
-              <input type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendEmailOTP()} className="memoria-input mb-4" autoFocus autoComplete="email" />
+              <input type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendEmailOTP()} className="memoria-input mb-4" autoFocus autoComplete="email" />
               {error && <p className="text-red-400 text-sm mb-3 text-center">{error}</p>}
               <motion.button whileTap={{ scale: 0.97 }} onClick={sendEmailOTP} disabled={loading} className="btn-primary w-full py-3 rounded-xl">
                 {loading ? 'Sending...' : 'Send code 🚀'}
@@ -220,7 +246,6 @@ export default function AuthPage() {
             </motion.div>
           )}
 
-          {/* PHONE */}
           {step === 'phone' && (
             <motion.div key="phone" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="glass-card p-8">
               <div className="text-4xl mb-4 text-center">📱</div>
@@ -228,7 +253,9 @@ export default function AuthPage() {
               <p className="text-slate-400 text-center text-sm mb-6">We&apos;ll text you a quick code</p>
               <div className="flex gap-2 mb-4">
                 <div className="px-3 py-3 rounded-xl text-slate-400 text-sm whitespace-nowrap flex items-center" style={{ background: 'rgba(255,255,255,0.07)', border: '1.5px solid rgba(255,255,255,0.1)' }}>🇮🇳 +91</div>
-                <input type="tel" placeholder="98765 43210" value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} onKeyDown={e => e.key === 'Enter' && sendPhoneOTP()} className="memoria-input flex-1" maxLength={10} autoFocus />
+                <input type="tel" placeholder="98765 43210" value={phone}
+                  onChange={e => setPhone(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={e => e.key === 'Enter' && sendPhoneOTP()} className="memoria-input flex-1" maxLength={10} autoFocus />
               </div>
               {error && <p className="text-red-400 text-sm mb-3 text-center">{error}</p>}
               <motion.button whileTap={{ scale: 0.97 }} onClick={sendPhoneOTP} disabled={loading} className="btn-primary w-full py-3 rounded-xl">
@@ -238,9 +265,9 @@ export default function AuthPage() {
             </motion.div>
           )}
 
-          {/* OTP — iPhone style */}
           {step === 'otp' && (
-            <motion.div key="otp" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.35, ease: [0.19, 1, 0.22, 1] }} className="glass-card p-8">
+            <motion.div key="otp" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.35, ease: [0.19, 1, 0.22, 1] }} className="glass-card p-8">
               <div className="text-center mb-6">
                 <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ repeat: Infinity, duration: 2 }} className="text-4xl mb-3">
                   {method === 'email' ? '📬' : '💬'}
@@ -248,8 +275,6 @@ export default function AuthPage() {
                 <h2 className="font-syne text-2xl font-bold mb-1">{method === 'email' ? 'Check your inbox' : 'Check your texts'}</h2>
                 <p className="text-slate-400 text-sm">Code sent to <span className="text-white font-medium">{method === 'email' ? email : `+91 ${phone}`}</span></p>
               </div>
-
-              {/* iPhone OTP boxes */}
               <div className="flex gap-2.5 justify-center mb-5">
                 {otp.map((digit, i) => (
                   <motion.div key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="relative">
@@ -272,55 +297,58 @@ export default function AuthPage() {
                   </motion.div>
                 ))}
               </div>
-
-              {/* Progress dots */}
               <div className="flex justify-center gap-1.5 mb-5">
                 {otp.map((d, i) => (
                   <motion.div key={i} animate={{ scale: d ? 1 : 0.6, opacity: d ? 1 : 0.3 }} className="w-1.5 h-1.5 rounded-full" style={{ background: d ? '#6558f5' : 'white' }} />
                 ))}
               </div>
-
               {error && <motion.p initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="text-red-400 text-sm mb-4 text-center">{error}</motion.p>}
-
-              <motion.button whileTap={{ scale: 0.97 }} onClick={verifyOTP} disabled={loading || otp.join('').length < 6} className="btn-primary w-full py-3.5 rounded-xl font-semibold" style={{ opacity: otp.join('').length < 6 ? 0.5 : 1 }}>
+              <motion.button whileTap={{ scale: 0.97 }} onClick={verifyOTP} disabled={loading || otp.join('').length < 6}
+                className="btn-primary w-full py-3.5 rounded-xl font-semibold" style={{ opacity: otp.join('').length < 6 ? 0.5 : 1 }}>
                 {loading ? <span className="flex items-center justify-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Verifying...</span> : 'Verify ✓'}
               </motion.button>
-
               <div className="flex items-center justify-center gap-1 mt-3">
                 <span className="text-slate-500 text-sm">Didn&apos;t get it?</span>
-                <button onClick={async () => { if (resendTimer > 0) return; setOtp(['', '', '', '', '', '']); setError(''); method === 'email' ? await sendEmailOTP() : await sendPhoneOTP() }} disabled={resendTimer > 0} className="text-sm font-medium transition-colors" style={{ color: resendTimer > 0 ? 'rgba(101,88,245,0.4)' : '#6558f5' }}>
+                <button onClick={async () => {
+                  if (resendTimer > 0) return
+                  setOtp(['', '', '', '', '', '']); setError('')
+                  method === 'email' ? await sendEmailOTP() : await sendPhoneOTP()
+                }} disabled={resendTimer > 0} className="text-sm font-medium transition-colors"
+                  style={{ color: resendTimer > 0 ? 'rgba(101,88,245,0.4)' : '#6558f5' }}>
                   {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
                 </button>
               </div>
-              <button onClick={() => { setStep(method === 'email' ? 'email' : 'phone'); setOtp(['', '', '', '', '', '']) }} className="w-full text-slate-500 text-sm mt-2 hover:text-slate-300 transition-colors">
+              <button onClick={() => { setStep(method === 'email' ? 'email' : 'phone'); setOtp(['', '', '', '', '', '']) }}
+                className="w-full text-slate-500 text-sm mt-2 hover:text-slate-300 transition-colors">
                 ← Change {method === 'email' ? 'email' : 'number'}
               </button>
             </motion.div>
           )}
 
-          {/* PROFILE SETUP */}
           {step === 'profile' && (
             <motion.div key="profile" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }} className="glass-card p-8">
               <div className="text-4xl mb-4 text-center">🎨</div>
               <h2 className="font-syne text-2xl font-bold text-center mb-1">Make it yours</h2>
               <p className="text-slate-400 text-center text-sm mb-5">Pick your vibe avatar &amp; name</p>
-
               <div className="flex justify-center mb-4">
-                <motion.div animate={{ scale: [1, 1.05, 1] }} transition={{ repeat: Infinity, duration: 2 }} className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl" style={{ background: 'rgba(101,88,245,0.2)', border: '2px solid rgba(101,88,245,0.5)' }}>
+                <motion.div animate={{ scale: [1, 1.05, 1] }} transition={{ repeat: Infinity, duration: 2 }}
+                  className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl"
+                  style={{ background: 'rgba(101,88,245,0.2)', border: '2px solid rgba(101,88,245,0.5)' }}>
                   {selectedAvatar}
                 </motion.div>
               </div>
-
               <div className="grid grid-cols-5 gap-2 mb-5">
                 {AVATARS.map(avatar => (
-                  <motion.button key={avatar} whileTap={{ scale: 0.85 }} onClick={() => setSelectedAvatar(avatar)} className="text-2xl py-2 rounded-xl transition-all"
+                  <motion.button key={avatar} whileTap={{ scale: 0.85 }} onClick={() => setSelectedAvatar(avatar)}
+                    className="text-2xl py-2 rounded-xl transition-all"
                     style={{ background: selectedAvatar === avatar ? 'rgba(101,88,245,0.3)' : 'rgba(255,255,255,0.05)', border: selectedAvatar === avatar ? '2px solid #6558f5' : '2px solid transparent' }}>
                     {avatar}
                   </motion.button>
                 ))}
               </div>
-
-              <input type="text" placeholder="Your name (e.g. Vibhor 🔥)" value={displayName} onChange={e => setDisplayName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveProfile()} className="memoria-input mb-4" maxLength={30} autoFocus />
+              <input type="text" placeholder="Your name (e.g. Vibhor 🔥)" value={displayName}
+                onChange={e => setDisplayName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveProfile()}
+                className="memoria-input mb-4" maxLength={30} autoFocus />
               {error && <p className="text-red-400 text-sm mb-3 text-center">{error}</p>}
               <motion.button whileTap={{ scale: 0.97 }} onClick={saveProfile} disabled={loading} className="btn-primary w-full py-3 rounded-xl">
                 {loading ? 'Saving...' : 'Enter Memoria 🚀'}
