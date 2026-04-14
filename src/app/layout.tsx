@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Toaster } from 'react-hot-toast'
+import { Analytics } from '@vercel/analytics/next'
 import { CustomCursor } from '@/components/shared/CustomCursor'
 import { FloatingParticles } from '@/components/shared/FloatingParticles'
 
@@ -40,6 +41,7 @@ export default function RootLayout({
         <CustomCursor />
         <FloatingParticles />
         {children}
+        <Analytics />
         <Toaster
           position="bottom-right"
           toastOptions={{

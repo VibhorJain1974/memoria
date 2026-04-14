@@ -1,11 +1,14 @@
 'use client'
-import { useEffect, useState } from 'react'
+
+export const dynamic = 'force-dynamic'
+
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 
-export default function JoinPage() {
+function JoinContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const code = searchParams.get('code') || ''
@@ -21,7 +24,6 @@ export default function JoinPage() {
         return
       }
 
-      // Find group by invite code
       const { data: group, error } = await supabase
         .from('groups')
         .select('id, name, invite_emoji')
@@ -36,7 +38,6 @@ export default function JoinPage() {
       setGroupName(group.name)
       setStatus('joining')
 
-      // Add to group
       const { error: joinError } = await supabase.from('group_members').upsert({
         group_id: group.id,
         user_id: user.id,
@@ -55,56 +56,64 @@ export default function JoinPage() {
     }
     if (code) join()
     else setStatus('error')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code])
 
   return (
-    <div className="min-h-screen bg-dark-base flex items-center justify-center aurora-bg">
+    <div className="min-h-screen flex items-center justify-center relative overflow-hidden"
+      style={{ background: '#0a0a0f' }}>
+      <div className="aurora-bg">
+        <div className="aurora-orb aurora-orb-1" />
+        <div className="aurora-orb aurora-orb-2" />
+        <div className="aurora-orb aurora-orb-3" />
+      </div>
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="glass rounded-3xl p-10 border border-white/10 text-center max-w-sm mx-4"
+        className="glass-card p-10 text-center max-w-sm mx-4 relative z-10"
       >
         {status === 'loading' && (
-          <>
-            <div className="text-5xl mb-4 animate-bounce-in">🔍</div>
-            <p className="text-white/60">Finding your group...</p>
-          </>
+          <><div className="text-5xl mb-4 animate-bounce">🔍</div>
+          <p className="text-slate-400">Finding your group...</p></>
         )}
         {status === 'joining' && (
-          <>
-            <div className="text-5xl mb-4 animate-bounce-in">🎉</div>
-            <h2 className="font-display text-2xl font-bold mb-2">Joining {groupName}!</h2>
-            <p className="text-white/40 text-sm">Hold on...</p>
-            <div className="mt-4 flex justify-center gap-1">
-              {[0,1,2].map(i => (
-                <motion.div key={i} animate={{ scale: [1,1.4,1] }}
-                  transition={{ duration: 0.6, delay: i*0.15, repeat: Infinity }}
-                  className="w-2 h-2 rounded-full bg-memoria-500" />
-              ))}
-            </div>
-          </>
+          <><div className="text-5xl mb-4">🎉</div>
+          <h2 className="font-syne text-2xl font-bold mb-2">Joining {groupName}!</h2>
+          <p className="text-slate-400 text-sm">Hold on...</p>
+          <div className="mt-4 flex justify-center gap-2">
+            {[0,1,2].map(i => (
+              <motion.div key={i} animate={{ scale: [1,1.4,1] }}
+                transition={{ duration: 0.6, delay: i*0.15, repeat: Infinity }}
+                className="w-2 h-2 rounded-full" style={{ background: '#6558f5' }} />
+            ))}
+          </div></>
         )}
         {status === 'done' && (
-          <>
-            <div className="text-5xl mb-4">✅</div>
-            <h2 className="font-display text-2xl font-bold mb-2">You&apos;re in!</h2>
-            <p className="text-white/40 text-sm">Taking you to {groupName}...</p>
-          </>
+          <><div className="text-5xl mb-4">✅</div>
+          <h2 className="font-syne text-2xl font-bold mb-2">You&apos;re in!</h2>
+          <p className="text-slate-400 text-sm">Taking you to {groupName}...</p></>
         )}
         {status === 'error' && (
-          <>
-            <div className="text-5xl mb-4">😅</div>
-            <h2 className="font-display text-xl font-bold mb-2">Invalid code</h2>
-            <p className="text-white/40 text-sm mb-6">This invite link seems wrong or expired.</p>
-            <button onClick={() => router.push('/dashboard')}
-              className="px-6 py-3 rounded-2xl text-sm font-semibold"
-              style={{ background: 'linear-gradient(135deg, #6558f5, #ec4899)' }}
-              data-clickable>
-              Go to dashboard
-            </button>
-          </>
+          <><div className="text-5xl mb-4">😅</div>
+          <h2 className="font-syne text-xl font-bold mb-2">Invalid code</h2>
+          <p className="text-slate-400 text-sm mb-6">This invite link seems wrong or expired.</p>
+          <button onClick={() => router.push('/dashboard')} className="btn-primary px-6 py-3 rounded-2xl text-sm">
+            Go to dashboard
+          </button></>
         )}
       </motion.div>
     </div>
+  )
+}
+
+export default function JoinPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a0a0f' }}>
+        <div className="text-4xl animate-spin">⏳</div>
+      </div>
+    }>
+      <JoinContent />
+    </Suspense>
   )
 }
