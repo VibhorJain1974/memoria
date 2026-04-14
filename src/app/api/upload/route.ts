@@ -1,8 +1,4 @@
-const fs = require('fs')
-const path = require('path')
-
-const files = {
-  'src/app/api/upload/route.ts': `import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { smartUpload, buildR2Key, checkStorageAlert, sendStorageAlert } from '@/lib/r2'
 import { createClient } from '@/lib/supabase-server'
 
@@ -45,13 +41,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 })
   }
 }
-`,
-}
-
-for (const [filePath, content] of Object.entries(files)) {
-  const fullPath = path.join(__dirname, filePath)
-  fs.mkdirSync(path.dirname(fullPath), { recursive: true })
-  fs.writeFileSync(fullPath, content, 'utf8')
-  console.log('✅ Created:', filePath)
-}
-console.log('\\nAll done! Delete this file (setup_files.js) when finished.')
