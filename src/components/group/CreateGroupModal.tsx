@@ -17,58 +17,45 @@ const INVITE_EMOJIS = ['🎉', '🔥', '💫', '🌊', '🎭', '🦋', '🌟', '
 
 export function CreateGroupModal({ open, onClose, onCreated }: Props) {
   const supabase = createClient()
-  const [name, setName]         = useState('')
-  const [desc, setDesc]         = useState('')
+  const [name, setName] = useState('')
+  const [desc, setDesc] = useState('')
   const [gradient, setGradient] = useState(GROUP_GRADIENTS[0])
-  const [emoji, setEmoji]       = useState('🎉')
-  const [loading, setLoading]   = useState(false)
-  const [step, setStep]         = useState<'form' | 'invite'>('form')
+  const [emoji, setEmoji] = useState('🎉')
+  const [loading, setLoading] = useState(false)
+  const [step, setStep] = useState<'form' | 'invite'>('form')
   const [createdGroup, setCreatedGroup] = useState<Group | null>(null)
-  const [copied, setCopied]     = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const create = async () => {
     if (!name.trim()) return toast.error('Give your group a name!')
     setLoading(true)
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not logged in')
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
 
-      // Step 1: insert group (no .select() yet to avoid RLS race)
-      const { data: group, error: groupErr } = await supabase
-        .from('groups')
-        .insert({
-          name: name.trim(),
-          description: desc.trim() || null,
-          cover_gradient: gradient,
-          invite_emoji: emoji,
-          created_by: user.id,
-        })
-        .select()
-        .single()
+    const { data: group, error } = await supabase
+      .from('groups')
+      .insert({ name: name.trim(), description: desc.trim(), cover_gradient: gradient, invite_emoji: emoji, created_by: user.id })
+      .select()
+      .single()
 
-      if (groupErr || !group) throw groupErr || new Error('Group creation failed')
-
-      // Step 2: add creator as admin member
-      const { error: memberErr } = await supabase.from('group_members').insert({
-        group_id: group.id,
-        user_id:  user.id,
-        role:     'admin',
-      })
-      if (memberErr) console.warn('Member insert error (non-fatal):', memberErr)
-
-      setCreatedGroup(group)
-      setStep('invite')
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Could not create group'
-      toast.error(msg)
-    } finally {
+    if (error || !group) {
+      toast.error('Could not create group')
       setLoading(false)
+      return
     }
+
+    // Add creator as admin
+    await supabase.from('group_members').insert({ group_id: group.id, user_id: user.id, role: 'admin' })
+
+    setCreatedGroup(group)
+    setStep('invite')
+    setLoading(false)
   }
 
   const copyLink = () => {
     if (!createdGroup) return
-    navigator.clipboard.writeText(`${window.location.origin}/join?code=${createdGroup.invite_code}`)
+    const url = `${window.location.origin}/join?code=${createdGroup.invite_code}`
+    navigator.clipboard.writeText(url)
     setCopied(true)
     toast.success('Invite link copied! 🔗')
     setTimeout(() => setCopied(false), 2000)
@@ -97,18 +84,18 @@ export function CreateGroupModal({ open, onClose, onCreated }: Props) {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.9, y: 20 }}
           transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-          className="w-full max-w-md glass-card rounded-3xl border border-white/10 overflow-hidden"
+          className="w-full max-w-md glass-strong rounded-4xl border border-white/10 overflow-hidden"
         >
           {/* Header */}
           <div className="p-6 border-b border-white/5 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="text-2xl">{step === 'form' ? '🫂' : '🎉'}</div>
-              <h2 className="font-syne text-xl font-semibold">
+              <h2 className="font-display text-xl font-semibold">
                 {step === 'form' ? 'Create a group' : 'Invite your crew!'}
               </h2>
             </div>
             <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-              onClick={onClose} className="text-white/30 hover:text-white transition-colors">
+              onClick={onClose} className="text-white/30 hover:text-white transition-colors" data-clickable>
               <X size={20} />
             </motion.button>
           </div>
@@ -118,16 +105,16 @@ export function CreateGroupModal({ open, onClose, onCreated }: Props) {
               {/* Gradient preview + picker */}
               <div>
                 <p className="text-xs text-white/40 uppercase tracking-widest mb-3">Pick a vibe</p>
-                <div className="h-24 rounded-2xl mb-3 transition-all duration-500 relative overflow-hidden flex items-center justify-center"
+                <div className="h-24 rounded-2xl mb-3 transition-all duration-500 relative overflow-hidden"
                   style={{ background: gradient }}>
-                  <div className="text-4xl">{emoji}</div>
+                  <div className="absolute inset-0 flex items-center justify-center text-4xl">{emoji}</div>
                 </div>
                 <div className="grid grid-cols-8 gap-1.5">
                   {GROUP_GRADIENTS.map((g, i) => (
                     <motion.button key={i} whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }}
                       onClick={() => setGradient(g)}
-                      className={`h-7 rounded-lg transition-all ${gradient === g ? 'ring-2 ring-white ring-offset-1 ring-offset-black' : ''}`}
-                      style={{ background: g }} />
+                      className={`h-7 rounded-lg transition-all ${gradient === g ? 'ring-2 ring-white ring-offset-1 ring-offset-dark-card' : ''}`}
+                      style={{ background: g }} data-clickable />
                   ))}
                 </div>
               </div>
@@ -139,39 +126,46 @@ export function CreateGroupModal({ open, onClose, onCreated }: Props) {
                   {INVITE_EMOJIS.map(e => (
                     <motion.button key={e} whileHover={{ scale: 1.2 }} whileTap={{ scale: 0.9 }}
                       onClick={() => setEmoji(e)}
-                      className={`text-xl py-1.5 rounded-xl transition-all ${emoji === e ? 'bg-purple-500/30 border border-purple-400' : 'bg-white/5 hover:bg-white/10'}`}>
+                      className={`text-xl py-1.5 rounded-xl transition-all ${emoji === e ? 'bg-memoria-500/30 border border-memoria-400' : 'bg-white/5 hover:bg-white/10'}`}
+                      data-clickable>
                       {e}
                     </motion.button>
                   ))}
                 </div>
               </div>
 
-              <input type="text" placeholder="Group name (e.g. Hackathon Crew 🔥)"
-                value={name} onChange={e => setName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && create()}
-                className="memoria-input" />
-
-              <textarea placeholder="Description (optional)"
-                value={desc} onChange={e => setDesc(e.target.value)}
-                rows={2}
-                className="memoria-input resize-none" />
+              <div>
+                <input type="text" placeholder="Group name (e.g. Hackathon Crew 🔥)"
+                  value={name} onChange={e => setName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && create()}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-white/30 focus:border-memoria-500 transition-all mb-3" />
+                <textarea placeholder="Description (optional)"
+                  value={desc} onChange={e => setDesc(e.target.value)}
+                  rows={2}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder-white/30 focus:border-memoria-500 transition-all resize-none" />
+              </div>
 
               <motion.button
                 whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                 onClick={create} disabled={loading || !name.trim()}
-                className="btn-primary w-full py-3.5 rounded-2xl disabled:opacity-40">
+                className="w-full py-3.5 rounded-2xl font-semibold text-white disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg, #6558f5, #ec4899)' }}
+                data-clickable>
                 {loading ? 'Creating...' : 'Create group ✨'}
               </motion.button>
             </div>
           ) : (
             <div className="p-6 text-center space-y-5">
-              <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 1, repeat: 2 }}
+              <motion.div
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ duration: 1, repeat: 2 }}
                 className="text-6xl">🎉</motion.div>
               <div>
-                <h3 className="font-syne text-2xl font-bold mb-1">{createdGroup?.name} is ready!</h3>
-                <p className="text-white/40 text-sm">Share the invite code with your friends</p>
+                <h3 className="font-display text-2xl font-bold mb-1">{createdGroup?.name} is ready!</h3>
+                <p className="text-white/40 text-sm">Share the invite code or link with your friends</p>
               </div>
 
+              {/* Invite code */}
               <div className="py-4 px-6 rounded-2xl glass border border-white/10">
                 <p className="text-xs text-white/30 uppercase tracking-widest mb-2">Invite code</p>
                 <p className="font-mono text-4xl font-bold tracking-[0.3em] gradient-text">
@@ -179,15 +173,21 @@ export function CreateGroupModal({ open, onClose, onCreated }: Props) {
                 </p>
               </div>
 
-              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+              <motion.button
+                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                 onClick={copyLink}
-                className="w-full py-3.5 rounded-2xl font-semibold flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 transition-all border border-white/10">
+                className="w-full py-3.5 rounded-2xl font-semibold flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 transition-all border border-white/10"
+                data-clickable>
                 {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
                 {copied ? 'Copied!' : 'Copy invite link'}
               </motion.button>
 
-              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                onClick={finish} className="btn-primary w-full py-3.5 rounded-2xl">
+              <motion.button
+                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                onClick={finish}
+                className="w-full py-3.5 rounded-2xl font-semibold text-white"
+                style={{ background: 'linear-gradient(135deg, #6558f5, #ec4899)' }}
+                data-clickable>
                 Open group →
               </motion.button>
             </div>
