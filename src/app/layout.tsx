@@ -9,10 +9,6 @@ export const metadata: Metadata = {
   title: 'Memoria — Your Memories, Unfiltered',
   description: 'A private, beautiful space for your friend group\'s photos and videos. Full quality, always.',
   manifest: '/manifest.json',
-  icons: {
-    icon: '/icon.png',
-    apple: '/apple-icon.png',
-  },
   openGraph: {
     title: 'Memoria',
     description: 'Your memories, unfiltered.',
