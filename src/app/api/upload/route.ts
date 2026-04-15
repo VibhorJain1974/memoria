@@ -28,13 +28,16 @@ export async function POST(request: NextRequest) {
     const { url, backend } = await smartUpload(uint8, key, file.type)
 
     // Non-blocking storage tracking
-    supabase.from('storage_stats').select('id, r2_bytes, b2_bytes').limit(1).single()
-      .then(({ data }) => {
-        if (data) supabase.from('storage_stats').update({
+    Promise.resolve(
+      supabase.from('storage_stats').select('id, r2_bytes, b2_bytes').limit(1).single()
+    ).then(({ data }) => {
+      if (data) return Promise.resolve(
+        supabase.from('storage_stats').update({
           r2_bytes: backend === 'r2' ? (data.r2_bytes || 0) + file.size : data.r2_bytes,
           b2_bytes: backend === 'b2' ? (data.b2_bytes || 0) + file.size : data.b2_bytes,
-        }).eq('id', data.id).then(() => {})
-      }).catch(() => {})
+        }).eq('id', data.id)
+      )
+    }).catch(() => {})
 
     // Non-blocking alert
     checkStorageAlert().then(async ({ should, usedBytes }) => {
