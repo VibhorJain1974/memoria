@@ -91,12 +91,17 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
       .from('sharing_blocks')
       .select('blocked_user_id')
       .eq('media_id', media.id)
-    setGroupMembers((members || []).map(m => ({
-      id: (m.profile as Profile).id,
-      display_name: (m.profile as Profile).display_name,
-      avatar_emoji: (m.profile as Profile).avatar_emoji,
-      user_id: m.user_id,
-    })))
+    setGroupMembers((members || []).map(m => {
+      // Supabase returns joined rows as an object or single-element array — handle both
+      const p = Array.isArray(m.profile) ? m.profile[0] : m.profile
+      const prof = p as { id: string; display_name?: string; avatar_emoji?: string } | null
+      return {
+        id:           prof?.id           ?? m.user_id,
+        display_name: prof?.display_name ?? undefined,
+        avatar_emoji: prof?.avatar_emoji ?? '👤',
+        user_id:      m.user_id,
+      }
+    }))
     setHiddenFrom((blocks || []).map(b => b.blocked_user_id))
     setShowHideModal(true)
   }

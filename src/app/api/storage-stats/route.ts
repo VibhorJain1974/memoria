@@ -16,12 +16,18 @@ export async function GET() {
 
     const { data: stats } = await supabase
       .from('storage_stats')
-      .select('r2_bytes, b2_bytes, alert_sent_at')
-      .limit(1).single()
+      .select('*')
+      .limit(1)
+      .single()
+
+    // Support both schema variants: r2_bytes (new) or bytes_used (old)
+    const r2Bytes = (stats as Record<string, unknown>)?.r2_bytes as number
+                || (stats as Record<string, unknown>)?.bytes_used as number
+                || 0
 
     return NextResponse.json({
-      r2_bytes: (stats?.r2_bytes as number) || 0,
-      b2_bytes: (stats?.b2_bytes as number) || 0,
+      r2_bytes:      r2Bytes,
+      file_count:    stats?.file_count || 0,
       alert_sent_at: stats?.alert_sent_at || null,
     })
   } catch {
