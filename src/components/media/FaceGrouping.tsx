@@ -1,11 +1,11 @@
 'use client'
 /**
- * FaceGrouping — detects faces in album photos client-side using face-api.js
- * Shows Instagram-style horizontal scrollable face bubbles at top of album.
- * Tap a face → filters the grid to photos containing that person.
+ * FaceGrouping — client-side face detection via face-api.js loaded from CDN.
+ * No npm install needed — loads the library dynamically at runtime.
+ * Shows Instagram-style face bubble row; tap to filter photos by person.
  */
-import { useEffect, useState, useRef, useCallback } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useEffect, useState, useCallback } from 'react'
+import { motion } from 'framer-motion'
 import { createClient } from '@/lib/supabase'
 import type { Media } from '@/types'
 
@@ -24,19 +24,30 @@ interface Props {
   onFilterChange: (mediaIds: string[] | null) => void
 }
 
+// Dynamically loads face-api.js from CDN — avoids any npm install
+async function loadFaceApi(): Promise<typeof window.faceapi | null> {
+  if (typeof window === 'undefined') return null
+  if ((window as unknown as Record<string, unknown>).faceapi) {
+    return (window as unknown as Record<string, unknown>).faceapi as typeof window.faceapi
+  }
+  return new Promise((resolve) => {
+    const script = document.createElement('script')
+    script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js'
+    script.onload = () => resolve((window as unknown as Record<string, unknown>).faceapi as typeof window.faceapi)
+    script.onerror = () => resolve(null)
+    document.head.appendChild(script)
+  })
+}
+
 export function FaceGrouping({ media, groupId, albumId, onFilterChange }: Props) {
   const [clusters, setClusters]         = useState<FaceCluster[]>([])
   const [activeFace, setActiveFace]     = useState<string | null>(null)
   const [scanning, setScanning]         = useState(false)
   const [scanProgress, setScanProgress] = useState(0)
-  const [modelsLoaded, setModelsLoaded] = useState(false)
   const [hasScanned, setHasScanned]     = useState(false)
   const supabase = createClient()
 
-  // Load existing clusters from DB on mount
-  useEffect(() => {
-    loadClusters()
-  }, [albumId])
+  useEffect(() => { loadClusters() }, [albumId])
 
   async function loadClusters() {
     const { data } = await supabase
@@ -44,292 +55,146 @@ export function FaceGrouping({ media, groupId, albumId, onFilterChange }: Props)
       .select('*')
       .eq('group_id', groupId)
       .order('media_count', { ascending: false })
-    if (data && data.length > 0) {
-      // Build clusters with cover thumbnails from media
-      const enriched: FaceCluster[] = data.map(c => {
-        const coverMedia = media.find(m => m.id === c.cover_media_id)
-        return {
-          id: c.id,
-          label: c.label || 'Person',
-          cover_url: coverMedia?.storage_path || coverMedia?.thumbnail_path || '',
-          media_ids: [],
-          media_count: c.media_count || 0,
-        }
-      })
-      // Load media_ids per cluster
-      const { data: faces } = await supabase
-        .from('media_faces')
-        .select('media_id, cluster_id')
-        .in('cluster_id', data.map(c => c.id))
-      if (faces) {
-        faces.forEach(f => {
-          const cluster = enriched.find(c => c.id === f.cluster_id)
-          if (cluster && !cluster.media_ids.includes(f.media_id)) {
-            cluster.media_ids.push(f.media_id)
-          }
-        })
-      }
-      setClusters(enriched.filter(c => c.media_count > 0))
-      setHasScanned(true)
-    }
-  }
+    if (!data || data.length === 0) return
 
-  async function loadFaceApiModels() {
-    if (modelsLoaded) return true
-    try {
-      // Dynamically import face-api.js
-      const faceapi = await import('@vladmandic/face-api')
-      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.14/model'
-      await Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-      ])
-      setModelsLoaded(true)
-      return true
-    } catch (err) {
-      console.error('Failed to load face-api models:', err)
-      return false
+    const enriched: FaceCluster[] = data.map(c => {
+      const coverMedia = media.find(m => m.id === c.cover_media_id)
+      return {
+        id: c.id,
+        label: c.label || 'Person',
+        cover_url: coverMedia?.storage_path || '',
+        media_ids: [],
+        media_count: c.media_count || 0,
+      }
+    })
+    const { data: faces } = await supabase
+      .from('media_faces')
+      .select('media_id, cluster_id')
+      .in('cluster_id', data.map(c => c.id))
+    if (faces) {
+      faces.forEach(f => {
+        const cl = enriched.find(c => c.id === f.cluster_id)
+        if (cl && !cl.media_ids.includes(f.media_id)) cl.media_ids.push(f.media_id)
+      })
     }
+    setClusters(enriched.filter(c => c.media_count > 0))
+    setHasScanned(true)
   }
 
   async function scanFaces() {
     if (scanning) return
-    setScanning(true)
-    setScanProgress(0)
+    setScanning(true); setScanProgress(5)
 
-    const loaded = await loadFaceApiModels()
-    if (!loaded) { setScanning(false); return }
+    const faceapi = await loadFaceApi()
+    if (!faceapi) { alert('Could not load face detection library. Check your internet connection.'); setScanning(false); return }
 
-    const faceapi = await import('@vladmandic/face-api')
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setScanning(false); return }
+    const MODEL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights'
+    try {
+      await Promise.all([
+        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL),
+      ])
+    } catch { alert('Could not load face models. Try again.'); setScanning(false); return }
 
-    // Only scan photos (not videos)
-    const photoMedia = media.filter(m => m.media_type !== 'video').slice(0, 50)
-    const allDescriptors: { mediaId: string; descriptor: Float32Array; imgUrl: string }[] = []
+    setScanProgress(20)
+    const photoMedia = media.filter(m => m.media_type !== 'video').slice(0, 40)
+    const allItems: { mediaId: string; descriptor: number[]; imgUrl: string }[] = []
 
     for (let i = 0; i < photoMedia.length; i++) {
       const m = photoMedia[i]
-      setScanProgress(Math.round((i / photoMedia.length) * 70))
+      setScanProgress(20 + Math.round((i / photoMedia.length) * 55))
       try {
-        const img = new Image()
-        img.crossOrigin = 'anonymous'
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve()
-          img.onerror = () => resolve() // skip on error
-          img.src = m.storage_path.startsWith('http')
-            ? m.storage_path
-            : `${process.env.NEXT_PUBLIC_R2_URL}/${m.storage_path}`
-          setTimeout(resolve, 5000) // timeout
-        })
-        const detections = await faceapi
-          .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
-          .withFaceLandmarks()
-          .withFaceDescriptors()
-
-        for (const det of detections) {
-          allDescriptors.push({ mediaId: m.id, descriptor: det.descriptor, imgUrl: m.storage_path })
-        }
+        const img = new Image(); img.crossOrigin = 'anonymous'
+        await new Promise<void>(res => { img.onload = () => res(); img.onerror = () => res(); img.src = m.storage_path; setTimeout(res, 4000) })
+        const dets = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 })).withFaceLandmarks().withFaceDescriptors()
+        for (const d of dets) allItems.push({ mediaId: m.id, descriptor: Array.from(d.descriptor), imgUrl: m.storage_path })
       } catch { /* skip */ }
     }
 
-    setScanProgress(75)
+    setScanProgress(80)
+    if (allItems.length === 0) { alert('No faces found! Make sure photos have visible faces.'); setScanning(false); setScanProgress(0); return }
 
-    if (allDescriptors.length === 0) {
-      setScanning(false)
-      setScanProgress(0)
-      alert('No faces found in these photos. Try uploading photos with people in them!')
-      return
-    }
-
-    // Simple clustering: group faces by similarity (Euclidean distance < 0.55)
-    const THRESHOLD = 0.55
-    const clusterGroups: { descriptors: Float32Array[]; mediaIds: string[]; coverUrl: string }[] = []
-
-    for (const item of allDescriptors) {
+    // Cluster by euclidean distance
+    const THRESH = 0.55
+    const groups: { descs: number[][]; mediaIds: string[]; coverUrl: string }[] = []
+    for (const item of allItems) {
       let matched = false
-      for (const cluster of clusterGroups) {
-        // Compare to all descriptors in cluster
-        const distances = cluster.descriptors.map(d => {
-          let sum = 0
-          for (let k = 0; k < d.length; k++) sum += (d[k] - item.descriptor[k]) ** 2
-          return Math.sqrt(sum)
-        })
-        const minDist = Math.min(...distances)
-        if (minDist < THRESHOLD) {
-          cluster.descriptors.push(item.descriptor)
-          if (!cluster.mediaIds.includes(item.mediaId)) {
-            cluster.mediaIds.push(item.mediaId)
-          }
-          matched = true
-          break
-        }
+      for (const g of groups) {
+        const minDist = Math.min(...g.descs.map(d => Math.sqrt(d.reduce((s, v, k) => s + (v - item.descriptor[k]) ** 2, 0))))
+        if (minDist < THRESH) { g.descs.push(item.descriptor); if (!g.mediaIds.includes(item.mediaId)) g.mediaIds.push(item.mediaId); matched = true; break }
       }
-      if (!matched) {
-        clusterGroups.push({
-          descriptors: [item.descriptor],
-          mediaIds: [item.mediaId],
-          coverUrl: item.imgUrl,
-        })
-      }
+      if (!matched) groups.push({ descs: [item.descriptor], mediaIds: [item.mediaId], coverUrl: item.imgUrl })
     }
-
-    setScanProgress(85)
-
-    // Save clusters to DB (only those with 2+ photos)
-    const significantClusters = clusterGroups.filter(c => c.mediaIds.length >= 1)
+    setScanProgress(90)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setScanning(false); return }
+    const significant = groups.filter(g => g.mediaIds.length >= 1)
     const newClusters: FaceCluster[] = []
-
-    for (let i = 0; i < significantClusters.length; i++) {
-      const cg = significantClusters[i]
-      const coverMediaId = media.find(m => m.id === cg.mediaIds[0])?.id || null
-
-      const { data: dbCluster } = await supabase.from('face_clusters').insert({
-        group_id:        groupId,
-        label:           `Person ${i + 1}`,
-        cover_media_id:  coverMediaId,
-        media_count:     cg.mediaIds.length,
-      }).select().single()
-
-      if (dbCluster) {
-        // Save face links
-        await supabase.from('media_faces').insert(
-          cg.mediaIds.map(mid => ({ media_id: mid, cluster_id: dbCluster.id }))
-        )
-        newClusters.push({
-          id: dbCluster.id,
-          label: dbCluster.label || `Person ${i + 1}`,
-          cover_url: cg.coverUrl,
-          media_ids: cg.mediaIds,
-          media_count: cg.mediaIds.length,
-        })
-        // Update cluster count
-        await supabase.from('face_clusters').update({ media_count: cg.mediaIds.length }).eq('id', dbCluster.id)
+    for (let i = 0; i < significant.length; i++) {
+      const g = significant[i]
+      const coverMediaId = media.find(m => m.id === g.mediaIds[0])?.id || null
+      const { data: dbC } = await supabase.from('face_clusters').insert({ group_id: groupId, label: `Person ${i + 1}`, cover_media_id: coverMediaId, media_count: g.mediaIds.length }).select().single()
+      if (dbC) {
+        await supabase.from('media_faces').insert(g.mediaIds.map(mid => ({ media_id: mid, cluster_id: dbC.id })))
+        newClusters.push({ id: dbC.id, label: dbC.label || `Person ${i + 1}`, cover_url: g.coverUrl, media_ids: g.mediaIds, media_count: g.mediaIds.length })
       }
     }
-
-    setScanProgress(100)
-    setClusters(newClusters)
-    setHasScanned(true)
-    setScanning(false)
+    setScanProgress(100); setClusters(newClusters); setHasScanned(true); setScanning(false)
   }
 
-  function handleFaceTap(cluster: FaceCluster) {
-    if (activeFace === cluster.id) {
-      setActiveFace(null)
-      onFilterChange(null)
-    } else {
-      setActiveFace(cluster.id)
-      onFilterChange(cluster.media_ids)
-    }
+  function tap(cluster: FaceCluster) {
+    if (activeFace === cluster.id) { setActiveFace(null); onFilterChange(null) }
+    else { setActiveFace(cluster.id); onFilterChange(cluster.media_ids) }
   }
 
-  async function renameFace(clusterId: string, currentLabel: string) {
-    const newLabel = prompt('Rename this person:', currentLabel)
-    if (!newLabel || newLabel === currentLabel) return
-    await supabase.from('face_clusters').update({ label: newLabel }).eq('id', clusterId)
-    setClusters(prev => prev.map(c => c.id === clusterId ? { ...c, label: newLabel } : c))
+  async function rename(clusterId: string, cur: string) {
+    const next = prompt('Rename:', cur)
+    if (!next || next === cur) return
+    await supabase.from('face_clusters').update({ label: next }).eq('id', clusterId)
+    setClusters(p => p.map(c => c.id === clusterId ? { ...c, label: next } : c))
   }
 
-  if (media.filter(m => m.media_type !== 'video').length === 0) return null
+  const photos = media.filter(m => m.media_type !== 'video')
+  if (photos.length === 0) return null
 
   return (
-    <div className="mb-4">
+    <div className="mb-3">
       {clusters.length === 0 && !hasScanned ? (
-        /* Scan prompt */
-        <motion.button
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          onClick={scanFaces}
-          disabled={scanning}
-          className="w-full py-3 px-4 rounded-2xl border border-dashed border-white/20 text-sm text-white/40 hover:text-white/70 hover:border-white/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-        >
+        <button onClick={scanFaces} disabled={scanning}
+          className="w-full py-2.5 px-4 rounded-2xl border border-dashed border-white/20 text-sm text-white/40 hover:text-white/60 hover:border-white/35 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
           {scanning ? (
-            <>
-              <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
-              <span>Scanning faces... {scanProgress}%</span>
-              <div className="flex-1 max-w-24 h-1 bg-white/10 rounded-full overflow-hidden">
-                <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${scanProgress}%` }} />
-              </div>
-            </>
-          ) : (
-            <>
-              <span>👤</span>
-              <span>Scan faces — group photos by person</span>
-            </>
-          )}
-        </motion.button>
+            <><div className="w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"/>
+            <span>Detecting faces... {scanProgress}%</span>
+            <div className="flex-1 max-w-20 h-1 bg-white/10 rounded-full overflow-hidden"><div className="h-full bg-purple-500 rounded-full transition-all duration-300" style={{ width: `${scanProgress}%` }}/></div></>
+          ) : <><span>👤</span><span>Group photos by face</span></>}
+        </button>
       ) : clusters.length > 0 ? (
-        /* Face bubbles row */
         <div className="space-y-2">
           <div className="flex items-center justify-between px-1">
-            <span className="text-xs text-white/30 uppercase tracking-widest">
-              {activeFace ? `Filtering by person` : 'People'}
-            </span>
-            <button onClick={() => { setActiveFace(null); onFilterChange(null); setClusters([]); setHasScanned(false) }}
-              className="text-xs text-white/20 hover:text-white/50 transition-colors">
-              rescan
-            </button>
+            <span className="text-xs text-white/30 uppercase tracking-widest">People</span>
+            <button onClick={() => { setActiveFace(null); onFilterChange(null); setClusters([]); setHasScanned(false) }} className="text-xs text-white/20 hover:text-white/50 transition-colors">rescan</button>
           </div>
-          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-            {/* "All" pill */}
-            <motion.button
-              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-              onClick={() => { setActiveFace(null); onFilterChange(null) }}
-              className={`flex-shrink-0 flex flex-col items-center gap-1.5 transition-all`}
-            >
-              <div className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl border-2 transition-all ${
-                !activeFace
-                  ? 'border-purple-500 bg-purple-500/20 shadow-lg shadow-purple-500/30'
-                  : 'border-white/20 bg-white/5'
-              }`}>
-                👥
-              </div>
-              <span className="text-xs text-white/50 w-16 text-center truncate">All</span>
-            </motion.button>
-
-            {clusters.map((cluster) => (
-              <motion.button
-                key={cluster.id}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => handleFaceTap(cluster)}
-                onContextMenu={e => { e.preventDefault(); renameFace(cluster.id, cluster.label) }}
-                className="flex-shrink-0 flex flex-col items-center gap-1.5"
-              >
-                <div className={`w-14 h-14 rounded-full overflow-hidden border-2 transition-all ${
-                  activeFace === cluster.id
-                    ? 'border-purple-500 shadow-lg shadow-purple-500/40 scale-110'
-                    : 'border-white/20'
-                }`}>
-                  {cluster.cover_url ? (
-                    <img
-                      src={cluster.cover_url}
-                      alt={cluster.label}
-                      className="w-full h-full object-cover"
-                      style={{ objectPosition: 'top center' }}
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-purple-500/40 to-pink-500/40 flex items-center justify-center text-xl">
-                      👤
-                    </div>
-                  )}
+          <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+            <button onClick={() => { setActiveFace(null); onFilterChange(null) }} className="flex-shrink-0 flex flex-col items-center gap-1">
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl border-2 transition-all ${!activeFace ? 'border-purple-500 bg-purple-500/20 shadow-lg shadow-purple-500/30' : 'border-white/20 bg-white/5'}`}>👥</div>
+              <span className="text-xs text-white/40">All</span>
+            </button>
+            {clusters.map(c => (
+              <button key={c.id} onClick={() => tap(c)} onContextMenu={e => { e.preventDefault(); rename(c.id, c.label) }}
+                className="flex-shrink-0 flex flex-col items-center gap-1 transition-transform active:scale-95">
+                <div className={`w-14 h-14 rounded-full overflow-hidden border-2 transition-all ${activeFace === c.id ? 'border-purple-500 shadow-lg shadow-purple-500/40 scale-110' : 'border-white/20'}`}>
+                  {c.cover_url ? <img src={c.cover_url} alt={c.label} className="w-full h-full object-cover" style={{ objectPosition: 'top' }}/> : <div className="w-full h-full bg-gradient-to-br from-purple-500/30 to-pink-500/30 flex items-center justify-center text-xl">👤</div>}
                 </div>
-                <span className="text-xs text-white/60 w-16 text-center truncate">{cluster.label}</span>
-                <span className="text-xs text-white/30">{cluster.media_count}</span>
-              </motion.button>
+                <span className="text-xs text-white/50 w-14 text-center truncate">{c.label}</span>
+                <span className="text-xs text-white/25">{c.media_count}</span>
+              </button>
             ))}
           </div>
-          {activeFace && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              className="text-xs text-purple-300/70 px-1">
-              Showing {clusters.find(c => c.id === activeFace)?.media_count || 0} photos · long-press face to rename · tap again to clear
-            </motion.div>
-          )}
+          {activeFace && <p className="text-xs text-purple-300/60 px-1">Showing {clusters.find(c => c.id === activeFace)?.media_count || 0} photos · long-press to rename · tap again to clear</p>}
         </div>
-      ) : hasScanned && clusters.length === 0 ? (
-        <p className="text-xs text-white/30 text-center py-2">No faces detected. Photos need visible faces.</p>
+      ) : hasScanned ? (
+        <p className="text-xs text-white/25 text-center py-2">No faces detected in these photos.</p>
       ) : null}
     </div>
   )

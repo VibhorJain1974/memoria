@@ -27,22 +27,30 @@ export async function POST(request: NextRequest) {
     const key   = buildR2Key(groupId, albumId, file.name)
     const { url, backend } = await smartUpload(uint8, key, file.type)
 
-    // Non-blocking storage tracking
-    Promise.resolve(
-      supabase.from('storage_stats').select('id, r2_bytes, b2_bytes').limit(1).single()
-    ).then(({ data }) => {
-      if (data) return Promise.resolve(
-        supabase.from('storage_stats').update({
-          r2_bytes: backend === 'r2' ? (data.r2_bytes || 0) + file.size : data.r2_bytes,
-          b2_bytes: backend === 'b2' ? (data.b2_bytes || 0) + file.size : data.b2_bytes,
-        }).eq('id', data.id)
-      )
-    }).catch(() => {})
+    // Non-blocking storage tracking — wrapped in void to avoid TS PromiseLike issue
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from('storage_stats')
+          .select('id, bytes_used, file_count')
+          .eq('provider', 'r2')
+          .single()
+        if (data) {
+          await supabase.from('storage_stats').update({
+            bytes_used: (data.bytes_used || 0) + file.size,
+            file_count: (data.file_count || 0) + 1,
+          }).eq('id', data.id)
+        }
+      } catch { /* non-critical */ }
+    })()
 
-    // Non-blocking alert
-    checkStorageAlert().then(async ({ should, usedBytes }) => {
-      if (should) await sendStorageAlert(usedBytes)
-    }).catch(() => {})
+    // Non-blocking alert check
+    void (async () => {
+      try {
+        const { should, usedBytes } = await checkStorageAlert()
+        if (should) await sendStorageAlert(usedBytes)
+      } catch { /* non-critical */ }
+    })()
 
     return NextResponse.json({ url, key, backend, size: file.size, type: file.type })
   } catch (err) {
