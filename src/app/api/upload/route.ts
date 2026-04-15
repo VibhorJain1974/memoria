@@ -23,16 +23,16 @@ export async function POST(request: NextRequest) {
     if (file.size > 500 * 1024 * 1024)
       return NextResponse.json({ error: 'File too large (max 500 MB)' }, { status: 413 })
 
-    const bytes  = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    const key    = buildR2Key(groupId, albumId, file.name)
-    const { url, backend } = await smartUpload(buffer, key, file.name, file.type)
+    // Use Uint8Array — avoids Buffer<SharedArrayBuffer> TS error
+    const arrayBuffer = await file.arrayBuffer()
+    const uint8 = new Uint8Array(arrayBuffer)
+    const key   = buildR2Key(groupId, albumId, file.name)
 
-    checkStorageAlert().then(async (should) => {
-      if (should) {
-        const { data } = await supabase.from('storage_stats').select('bytes_used').eq('provider','r2').single()
-        if (data) await sendStorageAlert(data.bytes_used)
-      }
+    const { url, backend } = await smartUpload(uint8, key, file.type)
+
+    // Non-blocking alert check
+    checkStorageAlert().then(async ({ should, usedBytes }) => {
+      if (should) await sendStorageAlert(usedBytes)
     }).catch(() => {})
 
     return NextResponse.json({ url, key, backend, size: file.size, type: file.type })
