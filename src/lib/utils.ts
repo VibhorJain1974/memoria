@@ -8,9 +8,7 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatDate(dateStr: string): string {
   const date = new Date(dateStr)
-  if (isThisYear(date)) {
-    return format(date, 'MMM d')
-  }
+  if (isThisYear(date)) return format(date, 'MMM d')
   return format(date, 'MMM d, yyyy')
 }
 
@@ -26,26 +24,20 @@ export function formatFileSize(bytes: number): string {
 }
 
 export function isLivePhoto(file: File): boolean {
-  // iPhone Live Photos come as .heic/.jpg paired with .mov
-  // We detect by file name pattern or by checking if there's a companion .mov
-  return file.type === 'image/heic' || 
+  return file.type === 'image/heic' ||
     (file.name.toLowerCase().endsWith('.jpg') && file.size > 3 * 1024 * 1024)
 }
 
-export function isVideo(file: File): boolean {
-  return file.type.startsWith('video/')
-}
-
-export function isImage(file: File): boolean {
-  return file.type.startsWith('image/')
-}
+export function isVideo(file: File): boolean { return file.type.startsWith('video/') }
+export function isImage(file: File): boolean { return file.type.startsWith('image/') }
 
 export async function computeSimpleHash(file: File): Promise<string> {
-  // Simple hash based on file size + first bytes for duplicate detection
-  const buffer = await file.slice(0, 1024).arrayBuffer()
+  // SHA-256 of first 4KB + file size — better duplicate detection, consistent format
+  const buffer = await file.slice(0, 4096).arrayBuffer()
   const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16) + '_' + file.size
+  const hex = Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.substring(0, 16)}_${file.size}`
 }
 
 export function generateInviteCode(): string {
@@ -54,12 +46,7 @@ export function generateInviteCode(): string {
 }
 
 export function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map(n => n[0])
-    .join('')
-    .toUpperCase()
-    .substring(0, 2)
+  return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
 }
 
 export function randomFrom<T>(arr: T[]): T {

@@ -53,7 +53,6 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
     multiple: true,
   })
 
-  // Upload to R2 via API route, save URL to Supabase
   const uploadAll = async () => {
     if (!files.length) return
     setUploading(true)
@@ -67,11 +66,12 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
       setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'uploading', progress: 10 } : p))
 
       try {
-        // Duplicate check
+        // Duplicate check — maybeSingle() never throws on 0 rows
         const hash = await computeSimpleHash(f.file)
         const { data: existing } = await supabase.from('media').select('id')
-          .eq('album_id', albumId).eq('phash', hash).single()
+          .eq('album_id', albumId).eq('phash', hash).maybeSingle()
         if (existing) {
+          toast(`Already uploaded: ${f.file.name}`, { icon: '♻️' })
           setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'done', progress: 100 } : p))
           continue
         }
@@ -83,11 +83,11 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
         form.append('albumId', albumId)
         const res = await fetch('/api/upload', { method: 'POST', body: form })
         if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-        const { url: storageUrl, key } = await res.json()
+        const { url: storageUrl } = await res.json()
 
-        setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, progress: 70 } : p))
+        setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, progress: 60 } : p))
 
-        // Upload Live Photo companion if present
+        // Live Photo companion
         let livePhotoUrl: string | null = null
         if (f.isLivePhoto && f.livePhotoVideo) {
           const liveForm = new FormData()
@@ -95,21 +95,18 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
           liveForm.append('groupId', groupId)
           liveForm.append('albumId', albumId)
           const liveRes = await fetch('/api/upload', { method: 'POST', body: liveForm })
-          if (liveRes.ok) {
-            const { url } = await liveRes.json()
-            livePhotoUrl = url
-          }
+          if (liveRes.ok) livePhotoUrl = (await liveRes.json()).url
         }
 
         const mediaType = f.isLivePhoto ? 'live_photo'
           : f.file.type.startsWith('video/') ? 'video' : 'photo'
 
-        // Save metadata to Supabase (URL, not blob)
-        const { error: dbErr } = await supabase.from('media').insert({
+        // Save to Supabase — get back the inserted row ID for thumbnail
+        const { data: inserted, error: dbErr } = await supabase.from('media').insert({
           album_id: albumId,
           group_id: groupId,
           uploaded_by: user.id,
-          storage_path: storageUrl,   // R2 public URL
+          storage_path: storageUrl,
           live_photo_path: livePhotoUrl,
           media_type: mediaType,
           mime_type: f.file.type,
@@ -117,8 +114,17 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
           original_filename: f.file.name,
           phash: hash,
           caption: caption.trim() || null,
-        })
+        }).select('id').single()
         if (dbErr) throw dbErr
+
+        // Non-blocking thumbnail generation for photos/live photos
+        if (inserted && mediaType !== 'video') {
+          void fetch('/api/thumbnail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mediaId: inserted.id, storageUrl }),
+          }).catch(() => {})
+        }
 
         uploaded++
         setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'done', progress: 100 } : p))
@@ -143,17 +149,20 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex flex-col" style={{ background: 'rgba(10,10,15,0.95)', backdropFilter: 'blur(20px)' }}>
+      className="fixed inset-0 z-50 flex flex-col"
+      style={{ background: 'rgba(10,10,15,0.95)', backdropFilter: 'blur(20px)' }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="flex items-center justify-between px-5 py-4"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <h2 className="font-syne text-lg font-bold flex items-center gap-2">
           <Upload size={18} className="text-purple-400" /> Upload memories
         </h2>
-        <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors"><X size={22} /></button>
+        <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+          <X size={22} />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
-        {/* Drop zone */}
         <div {...getRootProps()}
           className={`upload-zone rounded-3xl p-10 text-center cursor-pointer transition-all ${isDragActive ? 'drag-over' : ''}`}>
           <input {...getInputProps()} />
@@ -162,9 +171,8 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
           <p className="text-slate-400 text-sm">Tap to browse · Live Photos (.heic + .mov) · Full quality → Cloudflare R2</p>
           <div className="mt-3 flex items-center justify-center gap-4 text-xs text-slate-500">
             <span className="flex items-center gap-1"><Zap size={10} className="text-cyan-400" /> Live Photos</span>
-            <span>·</span><span>Any device</span>
-            <span>·</span><span>No compression</span>
-            <span>·</span><span>Max 500MB/file</span>
+            <span>·</span><span>Any device</span><span>·</span>
+            <span>No compression</span><span>·</span><span>Max 500MB/file</span>
           </div>
         </div>
 
@@ -174,7 +182,6 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
             className="memoria-input" />
         )}
 
-        {/* File grid */}
         {files.length > 0 && (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
             <AnimatePresence>
@@ -199,7 +206,9 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
                     </div>
                   )}
                   {f.status === 'error' && (
-                    <div className="absolute inset-0 bg-red-900/50 flex items-center justify-center"><AlertCircle size={18} className="text-red-400" /></div>
+                    <div className="absolute inset-0 bg-red-900/50 flex items-center justify-center">
+                      <AlertCircle size={18} className="text-red-400" />
+                    </div>
                   )}
                   {f.isLivePhoto && f.status === 'pending' && (
                     <div className="absolute top-1 left-1"><span className="live-badge">LIVE</span></div>
@@ -218,11 +227,14 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
       </div>
 
       {files.length > 0 && (
-        <div className="px-5 py-4 flex items-center justify-between" style={{ borderTop: '1px solid rgba(255,255,255,0.07)', background: 'rgba(22,22,31,0.9)' }}>
+        <div className="px-5 py-4 flex items-center justify-between"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.07)', background: 'rgba(22,22,31,0.9)' }}>
           <p className="text-slate-400 text-sm">
             {files.length} file{files.length > 1 ? 's' : ''}
             {files.filter(f => f.isLivePhoto).length > 0 && (
-              <span className="ml-2 text-cyan-400 text-xs"><Zap size={10} className="inline" /> {files.filter(f => f.isLivePhoto).length} Live</span>
+              <span className="ml-2 text-cyan-400 text-xs">
+                <Zap size={10} className="inline" /> {files.filter(f => f.isLivePhoto).length} Live
+              </span>
             )}
           </p>
           <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
