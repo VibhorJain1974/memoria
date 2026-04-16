@@ -31,17 +31,36 @@ export default function GroupPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const [{ data: g }, { data: a }, { data: m }, { data: prof }] = await Promise.all([
+      const [{ data: g }, { data: a }, { data: prof }] = await Promise.all([
         supabase.from('groups').select('*').eq('id', id).single(),
         supabase.from('albums').select('*').eq('group_id', id).order('created_at', { ascending: false }),
-        supabase.from('group_members').select('*, profile:profiles(*)').eq('group_id', id),
         supabase.from('profiles').select('*').eq('id', user.id).single(),
       ])
 
       setGroup(g)
       setAlbums(a || [])
-      setMembers(m || [])
       setCurrentUser(prof)
+
+      // Use RPC to get all group members (avoids RLS recursion)
+      const { data: m } = await supabase.rpc('get_group_members', { p_group_id: id })
+      if (m) {
+        // Shape into GroupMember[] format expected by GroupSettings
+        const shaped = (m as any[]).map(r => ({
+          id: r.id,
+          group_id: r.group_id,
+          user_id: r.user_id,
+          role: r.role,
+          joined_at: r.joined_at,
+          profile: {
+            id: r.user_id,
+            display_name: r.display_name,
+            avatar_emoji: r.avatar_emoji,
+            username: r.username,
+          } as Profile,
+        }))
+        setMembers(shaped)
+      }
+
       setLoading(false)
     }
     load()
@@ -62,7 +81,7 @@ export default function GroupPage() {
     <div className="p-8">
       <div className="h-40 shimmer rounded-3xl mb-6" />
       <div className="grid grid-cols-3 gap-4">
-        {[1,2,3].map(i => <div key={i} className="h-40 shimmer rounded-3xl" />)}
+        {[1, 2, 3].map(i => <div key={i} className="h-40 shimmer rounded-3xl" />)}
       </div>
     </div>
   )

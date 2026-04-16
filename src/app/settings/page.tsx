@@ -82,32 +82,24 @@ export default function SettingsPage() {
 
     if (!myGroups?.length) return
 
-    const groupIds = myGroups.map(g => g.group_id)
-    const { data: members } = await supabase
-      .from('group_members')
-      .select('user_id, profiles(id, display_name, avatar_emoji)')
-      .in('group_id', groupIds)
-      .neq('user_id', user.id)
-
-    if (!members) return
-
-    // Deduplicate
+    // Use RPC per group to avoid RLS recursion
     const seen = new Set<string>()
     const uniqueMembers: ContactNickname[] = []
 
-    for (const m of members) {
-      const p = m.profiles as unknown as Profile
-      if (!p || seen.has(p.id)) continue
-      seen.add(p.id)
-
-      // Get local nickname from localStorage
-      const stored = localStorage.getItem(`nickname_${p.id}`) || ''
-      uniqueMembers.push({
-        userId: p.id,
-        displayName: p.display_name || 'Unknown',
-        avatarEmoji: p.avatar_emoji || '🦊',
-        nickname: stored,
-      })
+    for (const g of myGroups) {
+      const { data: membersRaw } = await supabase
+        .rpc('get_group_members', { p_group_id: g.group_id })
+      for (const m of (membersRaw || []) as any[]) {
+        if (m.user_id === user.id || seen.has(m.user_id)) continue
+        seen.add(m.user_id)
+        const stored = localStorage.getItem(`nickname_${m.user_id}`) || ''
+        uniqueMembers.push({
+          userId: m.user_id,
+          displayName: m.display_name || 'Unknown',
+          avatarEmoji: m.avatar_emoji || '🦊',
+          nickname: stored,
+        })
+      }
     }
 
     setContacts(uniqueMembers)

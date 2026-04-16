@@ -21,14 +21,14 @@ interface GroupMember { id: string; display_name?: string; avatar_emoji: string;
 
 export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate }: Props) {
   const supabase = createClient()
-  const [reactions, setReactions]       = useState<Reaction[]>([])
-  const [comments, setComments]         = useState<Comment[]>([])
+  const [reactions, setReactions] = useState<Reaction[]>([])
+  const [comments, setComments] = useState<Comment[]>([])
   const [showComments, setShowComments] = useState(false)
-  const [showMenu, setShowMenu]         = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
   const [showHideModal, setShowHideModal] = useState(false)
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([])
-  const [hiddenFrom, setHiddenFrom]     = useState<string[]>([])
-  const [comment, setComment]           = useState('')
+  const [hiddenFrom, setHiddenFrom] = useState<string[]>([])
+  const [comment, setComment] = useState('')
   const [isLivePlaying, setIsLivePlaying] = useState(false)
   const liveVideoRef = useRef<HTMLVideoElement>(null)
   const currentIndex = allMedia.findIndex(m => m.id === media.id)
@@ -69,10 +69,10 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
 
   const downloadMedia = async () => {
     try {
-      const res  = await fetch(getMediaUrl(media.storage_path))
+      const res = await fetch(getMediaUrl(media.storage_path))
       const blob = await res.blob()
-      const url  = URL.createObjectURL(blob)
-      const a    = document.createElement('a')
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
       a.href = url; a.download = media.original_filename || `memoria_${media.id}`; a.click()
       URL.revokeObjectURL(url)
       toast.success('Saved! 📲')
@@ -82,24 +82,20 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
   // Load group members + existing sharing blocks for this media
   const openHideModal = async () => {
     setShowMenu(false)
-    const { data: members } = await supabase
-      .from('group_members')
-      .select('user_id, profile:profiles(id, display_name, avatar_emoji)')
-      .eq('group_id', media.group_id)
-      .neq('user_id', currentUser.id)
+    // Use RPC to avoid RLS recursion when fetching other members
+    const { data: membersRaw } = await supabase
+      .rpc('get_group_members', { p_group_id: media.group_id })
+    const members = (membersRaw || []).filter((m: any) => m.user_id !== currentUser.id)
     const { data: blocks } = await supabase
       .from('sharing_blocks')
       .select('blocked_user_id')
       .eq('media_id', media.id)
-    setGroupMembers((members || []).map(m => {
-      // Supabase returns joined rows as an object or single-element array — handle both
-      const p = Array.isArray(m.profile) ? m.profile[0] : m.profile
-      const prof = p as { id: string; display_name?: string; avatar_emoji?: string } | null
+    setGroupMembers(members.map((m: any) => {
       return {
-        id:           prof?.id           ?? m.user_id,
-        display_name: prof?.display_name ?? undefined,
-        avatar_emoji: prof?.avatar_emoji ?? '👤',
-        user_id:      m.user_id,
+        id: m.user_id,
+        display_name: m.display_name ?? undefined,
+        avatar_emoji: m.avatar_emoji ?? '👤',
+        user_id: m.user_id,
       }
     }))
     setHiddenFrom((blocks || []).map(b => b.blocked_user_id))
@@ -115,10 +111,10 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
       toast.success('Sharing unblocked')
     } else {
       await supabase.from('sharing_blocks').insert({
-        blocker_id:      currentUser.id,
+        blocker_id: currentUser.id,
         blocked_user_id: userId,
-        media_id:        media.id,
-        group_id:        media.group_id,
+        media_id: media.id,
+        group_id: media.group_id,
       })
       setHiddenFrom(prev => [...prev, userId])
       toast.success('Hidden from that person ✅')
@@ -126,9 +122,9 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
   }
 
   const mediaUrl = getMediaUrl(media.storage_path)
-  const liveUrl  = media.live_photo_path ? getMediaUrl(media.live_photo_path) : null
-  const isLive   = media.media_type === 'live_photo'
-  const isVideo  = media.media_type === 'video'
+  const liveUrl = media.live_photo_path ? getMediaUrl(media.live_photo_path) : null
+  const isLive = media.media_type === 'live_photo'
+  const isVideo = media.media_type === 'video'
 
   const reactionCounts = reactions.reduce<Record<string, number>>((acc, r) => {
     acc[r.emoji] = (acc[r.emoji] || 0) + 1; return acc
@@ -144,25 +140,25 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
       {/* Main media */}
       <div className="flex-1 flex items-center justify-center relative">
         {currentIndex > 0 && (
-          <button onClick={() => nav(-1)} className="absolute left-4 z-10 p-3 rounded-2xl glass border border-white/10"><ChevronLeft size={20}/></button>
+          <button onClick={() => nav(-1)} className="absolute left-4 z-10 p-3 rounded-2xl glass border border-white/10"><ChevronLeft size={20} /></button>
         )}
         {currentIndex < allMedia.length - 1 && (
-          <button onClick={() => nav(1)} className="absolute right-4 z-10 p-3 rounded-2xl glass border border-white/10"><ChevronRight size={20}/></button>
+          <button onClick={() => nav(1)} className="absolute right-4 z-10 p-3 rounded-2xl glass border border-white/10"><ChevronRight size={20} /></button>
         )}
 
         <div className="relative max-w-4xl max-h-screen w-full h-full flex items-center justify-center p-14">
           {isVideo ? (
-            <video src={mediaUrl} controls className="max-w-full max-h-full rounded-2xl"/>
+            <video src={mediaUrl} controls className="max-w-full max-h-full rounded-2xl" />
           ) : isLive && liveUrl ? (
             <div className="relative">
-              <img src={mediaUrl} alt="" className="max-w-full max-h-full rounded-2xl object-contain" style={{ display: isLivePlaying ? 'none' : 'block' }}/>
-              <video ref={liveVideoRef} src={liveUrl} autoPlay muted loop className="max-w-full max-h-full rounded-2xl object-contain" style={{ display: isLivePlaying ? 'block' : 'none' }}/>
+              <img src={mediaUrl} alt="" className="max-w-full max-h-full rounded-2xl object-contain" style={{ display: isLivePlaying ? 'none' : 'block' }} />
+              <video ref={liveVideoRef} src={liveUrl} autoPlay muted loop className="max-w-full max-h-full rounded-2xl object-contain" style={{ display: isLivePlaying ? 'block' : 'none' }} />
               <button onClick={() => setIsLivePlaying(!isLivePlaying)} className="absolute top-3 left-3 live-badge flex items-center gap-1">
-                <Zap size={9}/> {isLivePlaying ? 'LIVE ●' : 'LIVE'}
+                <Zap size={9} /> {isLivePlaying ? 'LIVE ●' : 'LIVE'}
               </button>
             </div>
           ) : (
-            <img src={mediaUrl} alt={media.caption || ''} className="max-w-full max-h-full rounded-2xl object-contain"/>
+            <img src={mediaUrl} alt={media.caption || ''} className="max-w-full max-h-full rounded-2xl object-contain" />
           )}
         </div>
 
@@ -176,27 +172,27 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={downloadMedia} className="p-2.5 rounded-xl glass border border-white/10"><Download size={16}/></button>
+            <button onClick={downloadMedia} className="p-2.5 rounded-xl glass border border-white/10"><Download size={16} /></button>
 
             {/* ⋯ menu */}
             <div className="relative">
-              <button onClick={() => setShowMenu(!showMenu)} className="p-2.5 rounded-xl glass border border-white/10"><MoreVertical size={16}/></button>
+              <button onClick={() => setShowMenu(!showMenu)} className="p-2.5 rounded-xl glass border border-white/10"><MoreVertical size={16} /></button>
               <AnimatePresence>
                 {showMenu && (
                   <motion.div initial={{ opacity: 0, scale: 0.9, y: -5 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
                     className="absolute right-0 top-12 glass border border-white/10 rounded-2xl overflow-hidden min-w-44 z-20">
                     <button onClick={openHideModal} className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-white/10 transition-all text-left">
-                      <EyeOff size={14} className="text-white/50"/> Hide from...
+                      <EyeOff size={14} className="text-white/50" /> Hide from...
                     </button>
                     <button onClick={() => { setShowMenu(false); onClose() }} className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-white/10 transition-all text-left">
-                      <X size={14} className="text-white/50"/> Close
+                      <X size={14} className="text-white/50" /> Close
                     </button>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
 
-            <button onClick={onClose} className="p-2.5 rounded-xl glass border border-white/10"><X size={16}/></button>
+            <button onClick={onClose} className="p-2.5 rounded-xl glass border border-white/10"><X size={16} /></button>
           </div>
         </div>
 
@@ -223,7 +219,7 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
             </div>
             <button onClick={() => setShowComments(!showComments)}
               className="p-2.5 rounded-xl glass border border-white/10 relative">
-              <MessageCircle size={18}/>
+              <MessageCircle size={18} />
               {comments.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-purple-500 text-xs flex items-center justify-center">{comments.length}</span>}
             </button>
           </div>
@@ -238,7 +234,7 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
             className="w-72 glass border-l border-white/5 flex flex-col">
             <div className="p-4 border-b border-white/5 flex items-center justify-between">
               <h3 className="font-semibold text-sm">Comments</h3>
-              <button onClick={() => setShowComments(false)} className="text-white/30 hover:text-white"><X size={16}/></button>
+              <button onClick={() => setShowComments(false)} className="text-white/30 hover:text-white"><X size={16} /></button>
             </div>
             {media.caption && <div className="px-4 pt-3"><p className="text-sm text-white/50 italic">"{media.caption}"</p></div>}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -256,7 +252,7 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
             </div>
             <div className="p-3 border-t border-white/5 flex gap-2">
               <input type="text" placeholder="Say something... 💬" value={comment} onChange={e => setComment(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendComment()}
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-purple-500 transition-all"/>
+                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-purple-500 transition-all" />
               <button onClick={sendComment} disabled={!comment.trim()} className="px-3 py-2 rounded-xl bg-purple-500/30 text-purple-300 border border-purple-500/30 disabled:opacity-30 text-sm">→</button>
             </div>
           </motion.div>
@@ -272,8 +268,8 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
               className="glass border border-white/10 rounded-3xl p-6 w-full max-w-xs">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold flex items-center gap-2"><EyeOff size={16} className="text-pink-400"/> Hide from...</h3>
-                <button onClick={() => setShowHideModal(false)} className="text-white/30 hover:text-white"><X size={16}/></button>
+                <h3 className="font-semibold flex items-center gap-2"><EyeOff size={16} className="text-pink-400" /> Hide from...</h3>
+                <button onClick={() => setShowHideModal(false)} className="text-white/30 hover:text-white"><X size={16} /></button>
               </div>
               <p className="text-xs text-white/35 mb-4 leading-relaxed">
                 Hidden people won't see this photo. They don't know they're blocked — it just won't appear for them.
@@ -289,7 +285,7 @@ export function MediaViewer({ media, allMedia, currentUser, onClose, onNavigate 
                         <span className="text-xl">{member.avatar_emoji}</span>
                         <span className="flex-1 text-left text-sm">{member.display_name || 'Member'}</span>
                         <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${isHidden ? 'bg-pink-500 border-pink-500' : 'border-white/30'}`}>
-                          {isHidden && <Check size={11} strokeWidth={3}/>}
+                          {isHidden && <Check size={11} strokeWidth={3} />}
                         </div>
                       </button>
                     )
