@@ -15,6 +15,74 @@ interface Props {
   onUploaded: () => void
 }
 
+// Files larger than 4 MB go via presigned URL (direct browser → R2).
+// Smaller files still use the existing /api/upload proxy route.
+const PRESIGN_THRESHOLD = 4 * 1024 * 1024
+
+async function uploadViaPresignedUrl(
+  file: File,
+  groupId: string,
+  albumId: string,
+  onProgress?: (pct: number) => void,
+): Promise<string> {
+  // 1. Ask the server for a presigned PUT URL
+  const res = await fetch('/api/upload-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: file.type,
+      groupId,
+      albumId,
+      fileSize: file.size,
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Failed to get upload URL (${res.status})`)
+  }
+  const { presignedUrl, publicUrl } = await res.json()
+
+  // 2. Upload directly from the browser to R2 via XMLHttpRequest so we
+  //    can track progress (fetch doesn't expose upload progress yet).
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', presignedUrl)
+    xhr.setRequestHeader('Content-Type', file.type)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100))
+      }
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve()
+      else reject(new Error(`R2 upload failed: ${xhr.status} ${xhr.statusText}`))
+    }
+    xhr.onerror = () => reject(new Error('Network error during upload'))
+    xhr.send(file)
+  })
+
+  return publicUrl
+}
+
+async function uploadViaProxy(
+  file: File,
+  groupId: string,
+  albumId: string,
+): Promise<string> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('groupId', groupId)
+  form.append('albumId', albumId)
+  const res = await fetch('/api/upload', { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Upload failed (${res.status})`)
+  }
+  const { url } = await res.json()
+  return url
+}
+
 export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
   const supabase = createClient()
   const [files, setFiles] = useState<UploadFile[]>([])
@@ -66,7 +134,7 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
       setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'uploading', progress: 10 } : p))
 
       try {
-        // Duplicate check — maybeSingle() never throws on 0 rows
+        // Duplicate check
         const hash = await computeSimpleHash(f.file)
         const { data: existing } = await supabase.from('media').select('id')
           .eq('album_id', albumId).eq('phash', hash).maybeSingle()
@@ -76,32 +144,44 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
           continue
         }
 
-        // Upload main file to R2
-        const form = new FormData()
-        form.append('file', f.file)
-        form.append('groupId', groupId)
-        form.append('albumId', albumId)
-        const res = await fetch('/api/upload', { method: 'POST', body: form })
-        if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-        const { url: storageUrl } = await res.json()
+        // Choose upload strategy: large files / videos use presigned URL
+        const usePresign = f.file.size > PRESIGN_THRESHOLD || f.file.type.startsWith('video/')
 
-        setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, progress: 60 } : p))
+        let storageUrl: string
+        if (usePresign) {
+          storageUrl = await uploadViaPresignedUrl(
+            f.file, groupId, albumId,
+            (pct) => setFiles(prev =>
+              prev.map((p, idx) => idx === i ? { ...p, progress: Math.round(pct * 0.6) + 10 } : p)
+            ),
+          )
+        } else {
+          storageUrl = await uploadViaProxy(f.file, groupId, albumId)
+        }
 
-        // Live Photo companion
+        setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, progress: 70 } : p))
+
+        // Live Photo companion video
         let livePhotoUrl: string | null = null
         if (f.isLivePhoto && f.livePhotoVideo) {
-          const liveForm = new FormData()
-          liveForm.append('file', f.livePhotoVideo)
-          liveForm.append('groupId', groupId)
-          liveForm.append('albumId', albumId)
-          const liveRes = await fetch('/api/upload', { method: 'POST', body: liveForm })
-          if (liveRes.ok) livePhotoUrl = (await liveRes.json()).url
+          try {
+            const liveRes = await fetch('/api/upload', {
+              method: 'POST',
+              body: (() => {
+                const form = new FormData()
+                form.append('file', f.livePhotoVideo!)
+                form.append('groupId', groupId)
+                form.append('albumId', albumId)
+                return form
+              })(),
+            })
+            if (liveRes.ok) livePhotoUrl = (await liveRes.json()).url
+          } catch { /* live photo companion upload failed — not critical */ }
         }
 
         const mediaType = f.isLivePhoto ? 'live_photo'
           : f.file.type.startsWith('video/') ? 'video' : 'photo'
 
-        // Save to Supabase — get back the inserted row ID for thumbnail
         const { data: inserted, error: dbErr } = await supabase.from('media').insert({
           album_id: albumId,
           group_id: groupId,
@@ -117,19 +197,21 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
         }).select('id').single()
         if (dbErr) throw dbErr
 
-        // Non-blocking thumbnail generation for photos/live photos
+        // Non-blocking thumbnail for photos
         if (inserted && mediaType !== 'video') {
           void fetch('/api/thumbnail', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mediaId: inserted.id, storageUrl }),
-          }).catch(() => {})
+          }).catch(() => { })
         }
 
         uploaded++
         setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'done', progress: 100 } : p))
       } catch (err) {
         console.error('Upload error:', err)
+        const msg = err instanceof Error ? err.message : 'Upload failed'
+        toast.error(`${f.file.name}: ${msg}`)
         setFiles(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'error' } : p))
       }
     }
@@ -191,10 +273,26 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
                   className="relative aspect-square rounded-2xl overflow-hidden group"
                   style={{ background: '#16161f' }}>
                   {f.file.type.startsWith('video/') ? (
-                    <div className="w-full h-full flex items-center justify-center text-3xl">🎬</div>
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-1">
+                      <span className="text-3xl">🎬</span>
+                      <span className="text-[10px] text-slate-400 font-medium px-1 text-center truncate w-full text-center">
+                        {(f.file.size / 1024 / 1024).toFixed(1)} MB
+                      </span>
+                    </div>
                   ) : (
                     <img src={f.preview} alt="" className="w-full h-full object-cover" draggable={false} />
                   )}
+
+                  {/* Progress bar for presigned uploads */}
+                  {f.status === 'uploading' && f.progress > 0 && f.progress < 100 && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+                      <div
+                        className="h-full bg-purple-400 transition-all duration-300"
+                        style={{ width: `${f.progress}%` }}
+                      />
+                    </div>
+                  )}
+
                   {f.status === 'uploading' && (
                     <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                       <div className="w-7 h-7 rounded-full border-2 border-purple-400 border-t-transparent animate-spin" />
@@ -235,6 +333,9 @@ export function UploadZone({ albumId, groupId, onClose, onUploaded }: Props) {
               <span className="ml-2 text-cyan-400 text-xs">
                 <Zap size={10} className="inline" /> {files.filter(f => f.isLivePhoto).length} Live
               </span>
+            )}
+            {files.some(f => f.file.type.startsWith('video/')) && (
+              <span className="ml-2 text-purple-400 text-xs">🎬 direct upload</span>
             )}
           </p>
           <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
